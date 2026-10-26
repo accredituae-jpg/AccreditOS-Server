@@ -61,8 +61,14 @@ app.use(helmet());
 const rawOrigins = env.FRONTEND_URL || "http://localhost:8080";
 const allowedOrigins = rawOrigins
   .split(",")
-  .map((o) => o.trim().replace(/\/$/, ""))
-  .filter(Boolean);
+  .flatMap((o) => {
+    const clean = o.trim().replace(/\/$/, "");
+    if (!clean) return [];
+    if (!clean.startsWith("http://") && !clean.startsWith("https://")) {
+      return [clean, "https://" + clean, "http://" + clean];
+    }
+    return [clean];
+  });
 
 app.use(
   cors({
