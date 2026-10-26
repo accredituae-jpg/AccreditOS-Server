@@ -72,7 +72,7 @@ const allowedOrigins = rawOrigins
 
 app.use(
   cors({
-    origin: (origin, callback) => {
+    origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
       // Allow server-to-server requests (no origin) and matched origins
       if (!origin || allowedOrigins.includes(origin)) {
         callback(null, true);
