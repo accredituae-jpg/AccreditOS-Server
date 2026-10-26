@@ -684,9 +684,9 @@ async function executeTool(name: string, args: Record<string, any>) {
 }
 
 const MODELS_CASCADE = [
-  "gemini-flash-lite-latest",
+  "gemini-3.1-flash-lite",
   "gemini-3.5-flash",
-  "gemini-flash-latest",
+  "gemini-flash-lite-latest",
   "gemini-3.8-flash",
 ];
 
@@ -718,11 +718,17 @@ async function runChatWithModel(
       const fnName = call.name || "";
       logger.info({ tool: fnName, args: call.args, model: modelName }, "AI Copilot executing ERP database tool");
       const toolResult = await executeTool(fnName, (call.args as Record<string, any>) || {});
-      toolResponses.push({
-        functionResponse: {
-          name: fnName,
-          response: toolResult,
+      const fnResponseObj: any = {
+        name: fnName,
+        response: {
+          output: toolResult,
         },
+      };
+      if (call.id) {
+        fnResponseObj.id = call.id;
+      }
+      toolResponses.push({
+        functionResponse: fnResponseObj,
       });
     }
 
