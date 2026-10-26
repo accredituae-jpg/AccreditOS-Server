@@ -1,6 +1,6 @@
 import { Router } from "express";
 import prisma from "../prisma.js";
-import { authenticateJWT } from "../middleware/auth.js";
+import { authenticateJWT, authorizeRoles } from "../middleware/auth.js";
 import { requirePermission } from "../middleware/permissions.js";
 import { successResponse, errorResponse } from "../utils/apiResponse.js";
 import logger from "../logger.js";
@@ -368,6 +368,67 @@ router.get(
     } catch (err: any) {
       logger.error(err, "Error loading dashboard statistics");
       errorResponse(res, "Failed to retrieve dashboard statistics.");
+    }
+  },
+);
+
+
+// GET /api/dashboard/system-storage - Developer Database & Cloud Storage Telemetry
+router.get(
+  "/system-storage",
+  authenticateJWT,
+  authorizeRoles(["super_admin"]),
+  async (req, res): Promise<void> => {
+    try {
+      const sizeRes = await prisma.$queryRawUnsafe<Array<{ bytes: any; pretty: string; db_name: string }>>(`
+        SELECT 
+          pg_database_size(current_database())::text as bytes, 
+          pg_size_pretty(pg_database_size(current_database())) as pretty,
+          current_database() as db_name;
+      `);
+
+      const tableRes = await prisma.$queryRawUnsafe<Array<{ table_name: string; total_size: string; bytes: any; approx_rows: any }>>(`
+        SELECT 
+          c.relname as table_name, 
+          pg_size_pretty(pg_total_relation_size(c.oid)) as total_size, 
+          pg_total_relation_size(c.oid)::text as bytes,
+          c.reltuples::bigint::text as approx_rows
+        FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'public' AND c.relkind = 'r'
+        ORDER BY pg_total_relation_size(c.oid) DESC
+        LIMIT 8;
+      `);
+
+      const bytes = Number(sizeRes[0]?.bytes || 0);
+      const mb = Number((bytes / (1024 * 1024)).toFixed(2));
+      const quotaMb = 500; // Supabase default free tier limit
+      const usedPercent = Number(((mb / quotaMb) * 100).toFixed(2));
+      const freeMb = Number((quotaMb - mb).toFixed(2));
+      const freePercent = Number((100 - usedPercent).toFixed(2));
+
+      successResponse(res, "System storage telemetry retrieved", {
+        usedBytes: bytes,
+        usedMb: mb,
+        usedPretty: sizeRes[0]?.pretty || `${mb} MB`,
+        quotaMb,
+        freeMb,
+        usedPercent,
+        freePercent,
+        databaseName: sizeRes[0]?.db_name || "postgres",
+        provider: "Supabase PostgreSQL (AWS Cloud)",
+        status: usedPercent > 85 ? "critical" : usedPercent > 65 ? "warning" : "healthy",
+        tables: (tableRes || []).map((t) => ({
+          tableName: t.table_name,
+          sizePretty: t.total_size,
+          bytes: Number(t.bytes || 0),
+          approxRows: Math.max(0, Number(t.approx_rows || 0)),
+        })),
+        timestamp: new Date().toISOString(),
+      });
+    } catch (err: any) {
+      logger.error(err, "Failed to retrieve database system storage metrics");
+      errorResponse(res, "Failed to retrieve storage metrics.");
     }
   },
 );
