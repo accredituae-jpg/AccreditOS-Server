@@ -1,0 +1,744 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id                String            @id @default(uuid())
+  email             String            @unique
+  passwordHash      String
+  name              String
+  role              Role
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  deletedAt         DateTime?
+  deletedBy         String?
+  isActive          Boolean           @default(true)
+  isDeleted         Boolean           @default(false)
+  mobile            String?
+  accountNo         String?
+  bankName          String?
+  iban              String?
+  attachments       Json?
+  auditLogs         AuditLog[]        @relation("UserAuditLogs")
+  invoicesCreated   Invoice[]         @relation("InvoiceCreatedBy")
+  invoicesUpdated   Invoice[]         @relation("InvoiceUpdatedBy")
+  approvedPayrolls  PayrollRecord[]   @relation("PayrollApprovedBy")
+  generatedPayrolls PayrollRecord[]   @relation("PayrollGeneratedBy")
+  paidPayrolls      PayrollRecord[]   @relation("PayrollPaidBy")
+  payrollRecords    PayrollRecord[]
+  receiptsCreated   Receipt[]         @relation("ReceiptCreatedBy")
+  receiptsVoided    Receipt[]         @relation("ReceiptVoidedBy")
+  receiptActivities ReceiptActivity[]
+  salaryAdvances    SalaryAdvance[]
+  salaryProfile     SalaryProfile?
+}
+
+model AuditLog {
+  id              String   @id @default(uuid())
+  entity          String
+  action          String
+  entityId        String?
+  performedById   String?
+  performedByName String?
+  details         String?
+  data            Json?
+  createdAt       DateTime @default(now())
+  performedBy     User?    @relation("UserAuditLogs", fields: [performedById], references: [id])
+
+  @@index([entity])
+  @@index([entityId])
+  @@index([performedById])
+  @@index([createdAt])
+}
+
+model Client {
+  id             String         @id @default(uuid())
+  companyName    String         @unique
+  contactPerson  String
+  phone          String
+  fax            String?
+  email          String
+  trnNo          String
+  poBox          String
+  location       String
+  status         ClientStatus   @default(active)
+  notes          String?
+  courseRates    Json?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  deletedAt      DateTime?
+  deletedBy      String?
+  isDeleted      Boolean        @default(false)
+  awardingBodies AwardingBody[]
+  certificates   Certificate[]
+  invoices       Invoice[]
+  receipts       Receipt[]
+  trainings      Training[]
+}
+
+model Course {
+  id           String        @id @default(uuid())
+  name         String        @unique
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  deletedAt    DateTime?
+  deletedBy    String?
+  isDeleted    Boolean       @default(false)
+  certificates Certificate[]
+  trainings    Training[]
+}
+
+model Training {
+  id                String         @id @default(uuid())
+  courseId          String
+  trainingType      TrainingType
+  serviceType       ServiceType    @default(training)
+  clientId          String
+  participantName   String
+  participantPhone  String?
+  drivingLicenseNo  String?
+  drivingLicenseType String?
+  customCompany     String?
+  regDate           DateTime
+  issueDate         DateTime
+  time              String
+  status            TrainingStatus
+  certificateIssued Boolean        @default(false)
+  awardingBodyId    String?
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  certificate       Certificate?
+  awardingBody      AwardingBody?  @relation(fields: [awardingBodyId], references: [id])
+  client            Client         @relation(fields: [clientId], references: [id])
+  course            Course         @relation(fields: [courseId], references: [id])
+  invoiceLineItems  InvoiceLineItem[]
+
+  @@index([clientId])
+  @@index([courseId])
+  @@index([awardingBodyId])
+  @@index([status])
+  @@index([regDate])
+  @@index([issueDate])
+  @@index([certificateIssued])
+  @@index([serviceType])
+  @@index([status, certificateIssued])
+  @@index([status, regDate])
+}
+
+model Certificate {
+  id                String            @id @default(uuid())
+  participantName   String
+  courseId          String
+  certificateNumber String?           @unique
+  serviceType       ServiceType       @default(training)
+  issueDate         DateTime
+  expiryDate        DateTime
+  clientId          String
+  customCompany     String?
+  certificateType   String            @default("Specific")
+  durationDays      Int?
+  drivingLicenseNo  String?
+  drivingLicenseType String?
+  status            CertificateStatus @default(created)
+  awardingBodyFee   Decimal           @default(0.00) @db.Decimal(12, 2)
+  awardingBodyId    String?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  distributedBy     String?
+  distributedDate   DateTime?
+  printedDate       DateTime?
+  trainingId        String?           @unique
+  awardingBody      AwardingBody?     @relation(fields: [awardingBodyId], references: [id])
+  client            Client            @relation(fields: [clientId], references: [id])
+  course            Course            @relation(fields: [courseId], references: [id])
+  training          Training?         @relation(fields: [trainingId], references: [id])
+  invoiceLineItem   InvoiceLineItem?
+  vendorBillLineItem VendorBillLineItem?
+
+  @@index([clientId])
+  @@index([courseId])
+  @@index([trainingId])
+  @@index([status])
+  @@index([awardingBodyId])
+  @@index([serviceType])
+  @@index([issueDate])
+  @@index([expiryDate])
+  @@index([status, expiryDate])
+}
+
+model InvoiceType {
+  id        String    @id @default(uuid())
+  name      String    @unique
+  isActive  Boolean   @default(true)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  invoices  Invoice[]
+}
+
+model ExpenseCategory {
+  id        String    @id @default(uuid())
+  name      String    @unique
+  isActive  Boolean   @default(true)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  expenses  Expense[]
+}
+
+model Invoice {
+  id                     String              @id @default(uuid())
+  invoiceNumber          String              @unique
+  clientId               String
+  typeId                 String
+  clientName             String
+  clientTRN              String
+  clientLocation         String
+  clientPhone            String
+  clientMobile           String
+  clientEmail            String
+  clientPoBox            String
+  clientReferenceContact String
+  trnNo                  String
+  poBox                  String
+  location               String
+  phone                  String
+  mobile                 String
+  referenceContact       String
+  vatAmount              Decimal             @db.Decimal(12, 2)
+  balance                Decimal             @db.Decimal(12, 2)
+  status                 InvoiceStatus       @default(draft)
+  date                   DateTime            @default(now())
+  dueDate                DateTime
+  description            String
+  currency               String              @default("AED")
+  notes                  String?
+  terms                  String?
+  createdById            String?
+  updatedById            String?
+  createdAt              DateTime            @default(now())
+  updatedAt              DateTime            @updatedAt
+  createdByName          String
+  updatedByName          String?
+  discountAmount         Decimal             @default(0) @db.Decimal(12, 2)
+  paidAmount             Decimal             @default(0.00) @db.Decimal(12, 2)
+  subtotal               Decimal             @db.Decimal(12, 2)
+  totalAmount            Decimal             @db.Decimal(12, 2)
+  client                 Client              @relation(fields: [clientId], references: [id])
+  createdBy              User?               @relation("InvoiceCreatedBy", fields: [createdById], references: [id])
+  type                   InvoiceType         @relation(fields: [typeId], references: [id])
+  updatedBy              User?               @relation("InvoiceUpdatedBy", fields: [updatedById], references: [id])
+  lineItems              InvoiceLineItem[]
+  payments               Payment[]
+  allocations            ReceiptAllocation[]
+
+  @@index([clientId])
+  @@index([typeId])
+  @@index([createdById])
+  @@index([updatedById])
+  @@index([status])
+  @@index([date])
+  @@index([dueDate])
+  @@index([status, date])
+}
+
+model InvoiceLineItem {
+  id            String       @id @default(uuid())
+  invoiceId     String
+  description   String
+  quantity      Decimal      @db.Decimal(12, 2)
+  unit          String?
+  unitPrice     Decimal      @db.Decimal(12, 2)
+  discount      Decimal      @default(0) @db.Decimal(12, 2)
+  vatPercent    Decimal      @default(5.00) @db.Decimal(5, 2)
+  lineSubtotal  Decimal      @db.Decimal(12, 2)
+  lineVat       Decimal      @db.Decimal(12, 2)
+  lineTotal     Decimal      @db.Decimal(12, 2)
+  sortOrder     Int          @default(0)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  certificateId String?      @unique
+  trainingId    String?
+  certificate   Certificate? @relation(fields: [certificateId], references: [id])
+  training      Training?    @relation(fields: [trainingId], references: [id])
+  invoice       Invoice      @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+  @@index([certificateId])
+  @@index([trainingId])
+}
+
+model Payment {
+  id            String        @id @default(uuid())
+  invoiceId     String
+  amount        Decimal       @db.Decimal(12, 2)
+  date          DateTime      @default(now())
+  paymentMethod String
+  referenceNo   String?
+  notes         String?
+  status        PaymentStatus @default(ACTIVE)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  invoice       Invoice       @relation(fields: [invoiceId], references: [id])
+
+  @@index([invoiceId])
+}
+
+model Expense {
+  id              String          @id @default(uuid())
+  categoryId      String
+  description     String
+  amount          Decimal         @db.Decimal(12, 2)
+  date            DateTime
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  payrollRecordId String?         @unique
+  isDeleted       Boolean         @default(false)
+  paymentMethod   String?         @default("account") // account | petty_cash | cash
+  paidByType      String?         @default("company") // company | employee
+  paidById        String?
+  paidByName      String?
+  status          String?         @default("paid")    // paid | not_returned | returned
+  returnedAt      DateTime?
+  returnedMethod  String?                             // account | petty_cash | cash
+  category        ExpenseCategory @relation(fields: [categoryId], references: [id])
+  payrollRecord   PayrollRecord?  @relation(fields: [payrollRecordId], references: [id])
+
+  @@index([categoryId])
+  @@index([date])
+  @@index([isDeleted, date])
+}
+
+model PettyCashTopUp {
+  id            String   @id @default(uuid())
+  amount        Decimal  @db.Decimal(12, 2)
+  date          DateTime @default(now())
+  source        String   @default("cash") // "cash" (Cash in Hand) | "account" (Bank Account)
+  notes         String?
+  createdById   String?
+  createdByName String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  isDeleted     Boolean  @default(false)
+
+  @@index([date])
+}
+
+model SalaryProfile {
+  id                 String    @id @default(uuid())
+  userId             String?   @unique
+  basicSalary        Decimal   @db.Decimal(12, 2)
+  paymentMethod      String?
+  joiningDate        DateTime?
+  isActive           Boolean   @default(true)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  userName           String    @default("Unknown")
+  foodAllowance      Decimal   @default(0.00) @db.Decimal(12, 2)
+  housingAllowance   Decimal   @default(0.00) @db.Decimal(12, 2)
+  transportAllowance Decimal   @default(0.00) @db.Decimal(12, 2)
+  user               User?     @relation(fields: [userId], references: [id])
+}
+
+model PayrollRecord {
+  id                 String          @id @default(uuid())
+  userId             String?
+  month              Int
+  year               Int
+  basicSalary        Decimal         @db.Decimal(12, 2)
+  grossSalary        Decimal         @db.Decimal(12, 2)
+  netSalary          Decimal         @db.Decimal(12, 2)
+  status             PayrollStatus   @default(draft)
+  periodStart        DateTime?
+  periodEnd          DateTime?
+  paymentReference   String?
+  paymentDate        DateTime?
+  notes              String?
+  createdById        String?
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+  userName           String          @default("Unknown")
+  payrollNumber      String          @unique
+  payslipNumber      String?         @unique
+  bonus              Decimal         @default(0.00) @db.Decimal(12, 2)
+  commission         Decimal         @default(0.00) @db.Decimal(12, 2)
+  advance            Decimal         @default(0.00) @db.Decimal(12, 2)
+  totalDeduction     Decimal         @default(0.00) @db.Decimal(12, 2)
+  approvalNote       String?
+  cancellationReason String?
+  generatedById      String?
+  generatedAt        DateTime?
+  approvedById       String?
+  approvedAt         DateTime?
+  paidById           String?
+  paidAt             DateTime?
+  foodAllowance      Decimal         @default(0.00) @db.Decimal(12, 2)
+  housingAllowance   Decimal         @default(0.00) @db.Decimal(12, 2)
+  leaveDeduction     Decimal         @default(0.00) @db.Decimal(12, 2)
+  loanInstallment    Decimal         @default(0.00) @db.Decimal(12, 2)
+  otherDeductions    Decimal         @default(0.00) @db.Decimal(12, 2)
+  otherEarnings      Decimal         @default(0.00) @db.Decimal(12, 2)
+  overtime           Decimal         @default(0.00) @db.Decimal(12, 2)
+  penalty            Decimal         @default(0.00) @db.Decimal(12, 2)
+  reimbursement      Decimal         @default(0.00) @db.Decimal(12, 2)
+  transportAllowance Decimal         @default(0.00) @db.Decimal(12, 2)
+  expense            Expense?
+  approvedBy         User?           @relation("PayrollApprovedBy", fields: [approvedById], references: [id])
+  generatedBy        User?           @relation("PayrollGeneratedBy", fields: [generatedById], references: [id])
+  paidBy             User?           @relation("PayrollPaidBy", fields: [paidById], references: [id])
+  user               User?           @relation(fields: [userId], references: [id])
+  salaryAdvances     SalaryAdvance[]
+
+  @@unique([userId, month, year])
+  @@index([status])
+  @@index([month, year])
+  @@index([userId, month, year])
+}
+
+model SalaryAdvance {
+  id              String         @id @default(uuid())
+  employeeId      String
+  employeeName    String
+  amount          Decimal        @db.Decimal(12, 2)
+  paymentDate     DateTime
+  deductionMonth  Int
+  deductionYear   Int
+  paymentMethod   String
+  status          AdvanceStatus  @default(Paid)
+  notes           String?
+  payrollRecordId String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  employee        User           @relation(fields: [employeeId], references: [id])
+  payrollRecord   PayrollRecord? @relation(fields: [payrollRecordId], references: [id])
+
+  @@index([employeeId])
+  @@index([deductionMonth, deductionYear])
+}
+
+model AwardingBody {
+  id              String        @id @default(uuid())
+  name            String        @unique
+  clientId        String?
+  certificateFee  Decimal       @default(0.00) @db.Decimal(12, 2)
+  isSystemIssued  Boolean       @default(false)
+  isActive        Boolean       @default(true)
+  trnNo           String?
+  phone           String?
+  email           String?
+  location        String?
+  poBox           String?
+  contactPerson   String?
+  paymentTerms    String?
+  isVatRegistered Boolean       @default(true)
+  vatPercent      Decimal       @default(5.00) @db.Decimal(5, 2)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  client          Client?       @relation(fields: [clientId], references: [id])
+  certificates    Certificate[]
+  trainings       Training[]
+  vendorBills     VendorBill[]
+
+  @@index([clientId])
+}
+
+model VendorBill {
+  id                  String               @id @default(uuid())
+  billNumber          String               @unique
+  awardingBodyId      String
+  vendorName          String
+  vendorTRN           String?
+  vendorLocation      String?
+  vendorPhone         String?
+  vendorEmail         String?
+  vendorPoBox         String?
+  vendorContactPerson  String?
+  billingPeriodStart  DateTime?
+  billingPeriodEnd    DateTime?
+  subtotal            Decimal              @db.Decimal(12, 2)
+  vatAmount           Decimal              @db.Decimal(12, 2)
+  totalAmount         Decimal              @db.Decimal(12, 2)
+  paidAmount          Decimal              @default(0.00) @db.Decimal(12, 2)
+  balance             Decimal              @db.Decimal(12, 2)
+  status              VendorBillStatus     @default(DRAFT)
+  date                DateTime             @default(now())
+  dueDate             DateTime
+  notes               String?
+  createdById         String?
+  createdByName       String
+  updatedById         String?
+  updatedByName       String?
+  cancelledAt         DateTime?
+  cancelledById       String?
+  cancelReason        String?
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  awardingBody        AwardingBody         @relation(fields: [awardingBodyId], references: [id])
+  lineItems           VendorBillLineItem[]
+  payments            VendorPayment[]
+
+  @@index([awardingBodyId])
+  @@index([status])
+}
+
+model VendorBillLineItem {
+  id                String       @id @default(uuid())
+  billId            String
+  description       String
+  quantity          Decimal      @default(1.00) @db.Decimal(12, 2)
+  unitPrice         Decimal      @db.Decimal(12, 2)
+  vatPercent        Decimal      @default(5.00) @db.Decimal(5, 2)
+  lineSubtotal      Decimal      @db.Decimal(12, 2)
+  lineVat           Decimal      @db.Decimal(12, 2)
+  lineTotal         Decimal      @db.Decimal(12, 2)
+  certificateId     String?      @unique
+  certificateNumber String?
+  participantName   String?
+  courseName        String?
+  certificate       Certificate? @relation(fields: [certificateId], references: [id])
+  vendorBill        VendorBill   @relation(fields: [billId], references: [id], onDelete: Cascade)
+
+  @@index([billId])
+  @@index([certificateId])
+}
+
+model VendorPayment {
+  id            String              @id @default(uuid())
+  billId        String
+  paymentNumber String              @unique
+  amount        Decimal             @db.Decimal(12, 2)
+  paymentDate   DateTime            @default(now())
+  paymentMethod VendorPaymentMethod
+  referenceNo   String?
+  bankAccount   String?
+  notes         String?
+  status        VendorPaymentStatus @default(COMPLETED)
+  createdById   String?
+  createdByName String
+  createdAt     DateTime            @default(now())
+  vendorBill    VendorBill          @relation(fields: [billId], references: [id])
+
+  @@index([billId])
+}
+
+model PermissionConfig {
+  role       Role @id
+  configJson Json
+}
+
+model Receipt {
+  id                   String               @id @default(uuid())
+  receiptNumber        Int?                 @unique
+  clientId             String
+  amount               Decimal              @db.Decimal(12, 2)
+  amountInWords        String
+  date                 DateTime             @default(now())
+  paymentMethod        ReceiptPaymentMethod
+  referenceNo          String?
+  drawnOnBank          String?
+  notes                String?
+  status               ReceiptStatus        @default(issued)
+  currency             String               @default("AED")
+  exchangeRate         Decimal?             @db.Decimal(12, 6)
+  clientSnapshot       Json
+  pdfUrl               String?
+  createdById          String?
+  voidedById           String?
+  voidedAt             DateTime?
+  voidReason           String?
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+  createdByName        String
+  voidedByName         String?
+  allocatedAmount      Decimal              @default(0.00) @db.Decimal(12, 2)
+  confirmedAt          DateTime?
+  confirmedBy          String?
+  paymentDate          DateTime?
+  transactionReference String?              @unique
+  client               Client               @relation(fields: [clientId], references: [id])
+  createdBy            User?                @relation("ReceiptCreatedBy", fields: [createdById], references: [id])
+  voidedBy             User?                @relation("ReceiptVoidedBy", fields: [voidedById], references: [id])
+  activities           ReceiptActivity[]
+  allocations          ReceiptAllocation[]
+
+  @@index([clientId])
+  @@index([createdById])
+  @@index([voidedById])
+  @@index([status])
+  @@index([date])
+  @@index([clientId, date])
+}
+
+model ReceiptAllocation {
+  id        String    @id @default(uuid())
+  receiptId String
+  invoiceId String
+  amount    Decimal   @db.Decimal(12, 2)
+  isVoided  Boolean   @default(false)
+  createdAt DateTime  @default(now())
+  createdBy String?
+  voidedAt  DateTime?
+  voidedBy  String?
+  invoice   Invoice   @relation(fields: [invoiceId], references: [id])
+  receipt   Receipt   @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+
+  @@unique([receiptId, invoiceId])
+  @@index([receiptId])
+  @@index([invoiceId])
+}
+
+model ReceiptActivity {
+  id              String   @id @default(uuid())
+  receiptId       String
+  action          String
+  performedById   String?
+  createdAt       DateTime @default(now())
+  details         String?
+  performedByName String
+  performedBy     User?    @relation(fields: [performedById], references: [id])
+  receipt         Receipt  @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+
+  @@index([receiptId])
+  @@index([performedById])
+}
+
+model StatusHistory {
+  id         String   @id @default(uuid())
+  entityType String
+  entityId   String
+  oldStatus  String
+  newStatus  String
+  changedBy  String?
+  reason     String?
+  createdAt  DateTime @default(now())
+
+  @@index([entityType, entityId])
+}
+
+model Sequence {
+  name         String @id
+  currentValue Int
+}
+
+model SystemSetting {
+  key       String   @id
+  valueJson Json
+  updatedAt DateTime @updatedAt
+}
+
+enum Role {
+  super_admin
+  admin
+  operation_admin
+  trainer
+  sales
+}
+
+enum ClientStatus {
+  active
+  archived
+}
+
+enum TrainingType {
+  classroom
+  online
+  site
+}
+
+enum ServiceType {
+  training
+  inspection
+}
+
+enum TrainingStatus {
+  upcoming
+  pending
+  completed
+  cancelled
+}
+
+enum CertificateType {
+  Specific
+  General
+  Duration
+}
+
+enum CertificateStatus {
+  created
+  sent
+  printed
+  distributed
+}
+
+enum InvoiceStatus {
+  draft
+  issued
+  partially_paid
+  paid
+  cancelled
+}
+
+enum ReceiptStatus {
+  issued
+  paid
+  voided
+}
+
+enum ReceiptPaymentMethod {
+  CASH
+  CHEQUE
+  BANK_TRANSFER
+  ONLINE
+}
+
+enum PaymentStatus {
+  ACTIVE
+  VOIDED
+}
+
+enum AdvanceStatus {
+  Paid
+  Deducted
+  Cancelled
+}
+
+enum PayrollStatus {
+  draft
+  approved
+  paid
+  cancelled
+}
+
+enum VendorBillStatus {
+  DRAFT
+  ISSUED
+  PARTIALLY_PAID
+  PAID
+  CANCELLED
+}
+
+enum VendorPaymentStatus {
+  COMPLETED
+  CANCELLED
+}
+
+enum VendorPaymentMethod {
+  CASH
+  BANK_TRANSFER
+  CHEQUE
+}
+
+model PasswordResetToken {
+  id        String   @id @default(uuid())
+  email     String
+  otp       String
+  expiresAt DateTime
+  isUsed    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([email])
+  @@index([otp])
+}
+
