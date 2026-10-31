@@ -16,6 +16,7 @@
     "test:receipt": "tsx tests/receipt-flow.test.ts",
     "test:payroll": "tsx tests/payroll-flow.test.ts",
     "test:audit": "tsx tests/audit-fixes.test.ts",
+    "test:vendor-bill-certificate": "tsx tests/vendor-bill-certificate.test.ts",
     "test:all": "tsx tests/training-flow.test.ts && tsx tests/certificate-flow.test.ts && tsx tests/invoice-flow.test.ts && tsx tests/receipt-flow.test.ts && tsx tests/payroll-flow.test.ts && tsx tests/audit-fixes.test.ts"
   },
   "prisma": {

@@ -5,6 +5,10 @@ import { requirePermission } from "../middleware/permissions.js";
 import logger from "../logger.js";
 import { Prisma, VendorBillStatus, VendorPaymentMethod } from "@prisma/client";
 import { recordAudit } from "../utils/audit.js";
+import {
+  healOrphanedVendorBillCertificates,
+  vendorLineSnapshot,
+} from "../services/vendorBillCertificate.service.js";
 
 const router = Router();
 
@@ -33,7 +37,9 @@ const vendorBillInclude = {
   awardingBody: true,
   lineItems: {
     include: {
-      certificate: true,
+      certificate: {
+        include: { course: true },
+      },
     },
   },
   payments: true,
@@ -79,10 +85,12 @@ const mapVendorBillResponse = (bill: any) => ({
     lineSubtotal: Number(li.lineSubtotal),
     lineVat: Number(li.lineVat),
     lineTotal: Number(li.lineTotal),
-    certificateId: li.certificateId,
-    certificateNumber: li.certificateNumber || li.certificate?.certificateNumber || null,
-    participantName: li.participantName || li.certificate?.participantName || null,
-    courseName: li.courseName || li.certificate?.course?.name || null,
+    certificateId: li.certificateId || li.certificate?.id || null,
+    certificateNumber: li.certificate
+      ? li.certificate.certificateNumber || `#${li.certificate.id.substring(0, 8)}`
+      : li.certificateNumber,
+    participantName: li.certificate?.participantName || li.participantName || null,
+    courseName: li.certificate?.course?.name || li.courseName || null,
   })),
   payments: (bill.payments || []).map((p: any) => ({
     id: p.id,
@@ -110,6 +118,12 @@ router.get("/vendor-bills/candidates", authenticateJWT, requirePermission("finan
   }
 
   try {
+    try {
+      await healOrphanedVendorBillCertificates(prisma);
+    } catch (healErr) {
+      logger.error({ err: healErr }, "Failed to relink reissued certificates to paid vendor bills");
+    }
+
     // Decouple any stale certificateId on cancelled bills so certificates are immediately eligible
     await prisma.vendorBillLineItem.updateMany({
       where: {
@@ -207,6 +221,12 @@ router.get("/vendor-bills/candidates", authenticateJWT, requirePermission("finan
 // Aggregates liabilities, unbilled certificates, and payment status grouped by Awarding Body (Vendor)
 router.get("/vendor-bills/vendors-summary", authenticateJWT, requirePermission(["finance", "reports"]), async (req, res): Promise<void> => {
   try {
+    try {
+      await healOrphanedVendorBillCertificates(prisma);
+    } catch (healErr) {
+      logger.error({ err: healErr }, "Failed to relink reissued certificates to paid vendor bills");
+    }
+
     const bodies = await prisma.awardingBody.findMany({
       where: { isActive: true },
       include: {
@@ -226,7 +246,7 @@ router.get("/vendor-bills/vendors-summary", authenticateJWT, requirePermission([
           where: { status: { not: "CANCELLED" } },
           include: {
             lineItems: {
-              include: { certificate: true },
+              include: { certificate: { include: { course: true } } },
             },
             payments: true,
           },
@@ -533,11 +553,7 @@ router.post("/vendor-bills", authenticateJWT, requirePermission("create_invoice"
         totalVat = totalVat.add(lineVat);
 
         return {
-          certificateId: cert.id,
-          certificateNumber: cert.certificateNumber || `#${cert.id.substring(0, 8)}`,
-          participantName: cert.participantName,
-          courseName: cert.course?.name || "Training Course",
-          description: `[${cert.certificateNumber || "CERT"}] ${cert.participantName} - ${cert.course?.name || "Stamp Fee"}`,
+          ...vendorLineSnapshot(cert),
           quantity: new Prisma.Decimal(1),
           unitPrice,
           vatPercent: new Prisma.Decimal(vatPct),
@@ -722,11 +738,7 @@ router.post("/vendor-bills/pay-vendor", authenticateJWT, requirePermission("crea
           totalVat = totalVat.add(lineVat);
 
           return {
-            certificateId: cert.id,
-            certificateNumber: cert.certificateNumber || `#${cert.id.substring(0, 8)}`,
-            participantName: cert.participantName,
-            courseName: cert.course?.name || "Training Course",
-            description: `[${cert.certificateNumber || "CERT"}] ${cert.participantName} - ${cert.course?.name || "Stamp Fee"}`,
+            ...vendorLineSnapshot(cert),
             quantity: new Prisma.Decimal(1),
             unitPrice,
             vatPercent: new Prisma.Decimal(vatPct),
@@ -993,11 +1005,7 @@ router.put("/vendor-bills/:id", authenticateJWT, requirePermission("edit_invoice
 
           return {
             billId: id,
-            certificateId: cert.id,
-            certificateNumber: cert.certificateNumber || `#${cert.id.substring(0, 8)}`,
-            participantName: cert.participantName,
-            courseName: cert.course?.name || "Training Course",
-            description: `[${cert.certificateNumber || "CERT"}] ${cert.participantName} - ${cert.course?.name || "Stamp Fee"}`,
+            ...vendorLineSnapshot(cert),
             quantity: new Prisma.Decimal(1),
             unitPrice,
             vatPercent: new Prisma.Decimal(vatPct),

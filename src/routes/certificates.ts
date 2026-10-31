@@ -8,6 +8,10 @@ import { genericErrorHandler } from "../utils/errorHandler.js";
 import { recordAudit } from "../utils/audit.js";
 import { StatusService } from "../services/status.service.js";
 import { CertificateValidator } from "../validators/certificate.validator.js";
+import {
+  relinkReissuedCertificateToVendorBill,
+  stampVendorLineBeforeCertificateDelete,
+} from "../services/vendorBillCertificate.service.js";
 
 const router = Router();
 
@@ -474,6 +478,7 @@ router.post("/bulk", authenticateJWT, requirePermission("issue_certificate"), au
           });
         }
 
+        await relinkReissuedCertificateToVendorBill(tx, cert.id);
         results.push(cert);
       }
 
@@ -565,12 +570,13 @@ router.post("/", authenticateJWT, requirePermission("issue_certificate"), author
       }
     }
 
+    const effectiveAwardingBodyId = awardingBodyId || training.awardingBodyId;
     const isInspection = (serviceType === "inspection" || training.serviceType === "inspection");
     let awardingBodyFee = 0.0;
     let isSystemIssued = false;
-    if (awardingBodyId && !isInspection) {
+    if (effectiveAwardingBodyId && !isInspection) {
       const ab = await prisma.awardingBody.findUnique({
-        where: { id: awardingBodyId }
+        where: { id: effectiveAwardingBodyId }
       });
       if (ab) {
         awardingBodyFee = Number(ab.certificateFee);
@@ -622,7 +628,7 @@ router.post("/", authenticateJWT, requirePermission("issue_certificate"), author
           drivingLicenseType: drivingLicenseType || training.drivingLicenseType || null,
           status: "created",
           awardingBodyFee,
-          awardingBodyId: awardingBodyId || null,
+          awardingBodyId: effectiveAwardingBodyId || null,
           trainingId: training.id
         },
         include: {
@@ -632,6 +638,8 @@ router.post("/", authenticateJWT, requirePermission("issue_certificate"), author
           training: true,
         }
       });
+
+      await relinkReissuedCertificateToVendorBill(tx, cert.id);
 
       // Update training status and lock it
       await StatusService.changeTrainingStatus(
@@ -815,6 +823,11 @@ router.delete("/:id", authenticateJWT, requirePermission("delete_certificate"), 
     }
 
     await prisma.$transaction(async (tx) => {
+      await stampVendorLineBeforeCertificateDelete(tx, {
+        id: cert.id,
+        trainingId: cert.trainingId,
+      });
+
       // 1. If there's a linked training, update its certificateIssued flag back to false
       if (cert.trainingId) {
         await tx.training.update({
