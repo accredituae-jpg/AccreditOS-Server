@@ -67,11 +67,10 @@ export function mapTrainingToDTO(raw: any): TrainingDTO {
     rawIssueDate: raw.issueDate,
     time: raw.time,
     status: raw.status,
-    certificateIssued: !!raw.certificate || raw.certificateIssued,
+    certificateIssued: !!raw.certificate,
     awardingBodyId: raw.awardingBodyId ?? null,
     awardingBodyName: raw.awardingBody?.name || "",
     createdAt: raw.createdAt,
     updatedAt: raw.updatedAt,
   };
 }
-

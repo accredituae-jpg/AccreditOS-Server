@@ -2,6 +2,7 @@ import "dotenv/config";
 import { GoogleGenAI, Type } from "@google/genai";
 import prisma from "../prisma.js";
 import logger from "../logger.js";
+import { healOrphanedVendorBillCertificates } from "./vendorBillCertificate.service.js";
 
 function getAiClient(): GoogleGenAI {
   const geminiApiKey = process.env.GEMINI_API_KEY;
@@ -431,6 +432,12 @@ async function executeTool(name: string, args: Record<string, any>) {
       case "get_vendor_payables": {
         const vendorName = args.vendorName ? String(args.vendorName).trim() : "";
         const limit = args.limit || 20;
+
+        try {
+          await healOrphanedVendorBillCertificates(prisma);
+        } catch (healErr) {
+          logger.error({ err: healErr }, "Failed to relink reissued certificates to paid vendor bills");
+        }
 
         const whereBody: any = { isActive: true };
         if (vendorName) {

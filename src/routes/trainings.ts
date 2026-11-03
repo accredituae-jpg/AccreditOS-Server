@@ -76,7 +76,7 @@ router.get(
       const trainings = await prisma.training.findMany({
         where: {
           status: whereStatus,
-          certificateIssued: false,
+          certificate: { is: null },
         },
         select: TrainingOptionsSelect,
         orderBy: { createdAt: "desc" },

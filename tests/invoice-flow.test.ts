@@ -147,12 +147,24 @@ async function runTest() {
     const invIssued = await StatusService.changeInvoiceStatus(inv.id, "issued", "TestRunner", "Invoice dispatch to client");
     assert(invIssued.status === "issued", "Invoice successfully transitioned to issued");
 
-    // 4. Validate change lock on non-draft invoice: reverting issued to draft is blocked
+    // 4. Unpaid issued invoices can be reopened for corrections
+    const invDraft = await StatusService.changeInvoiceStatus(inv.id, "draft", "TestRunner", "Mistake in entries");
+    assert(invDraft.status === "draft", "Unpaid issued invoice successfully reopened as draft");
+
+    await StatusService.changeInvoiceStatus(inv.id, "issued", "TestRunner", "Reissued for payment");
+    await prisma.invoice.update({
+      where: { id: inv.id },
+      data: { paidAmount: new Prisma.Decimal(1) },
+    });
     await assertThrows(
-      () => StatusService.changeInvoiceStatus(inv.id, "draft", "TestRunner", "Mistake in entries"),
-      "Invalid invoice status transition from issued to draft",
-      "Reverting issued invoice back to draft is blocked for audit and VAT integrity"
+      () => StatusService.changeInvoiceStatus(inv.id, "draft", "TestRunner", "Attempt to reopen paid invoice"),
+      "Only unpaid issued invoices can be reopened as drafts",
+      "Reopening an invoice with a payment balance is blocked"
     );
+    await prisma.invoice.update({
+      where: { id: inv.id },
+      data: { paidAmount: new Prisma.Decimal(0) },
+    });
 
     // 5. Safe cancellation: transition to cancelled is allowed
     const invCancelled = await StatusService.changeInvoiceStatus(inv.id, "cancelled", "TestRunner", "Cancelled duplicate invoice");

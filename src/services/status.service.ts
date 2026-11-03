@@ -155,10 +155,23 @@ export class StatusService {
       return invoice;
     }
 
+    if (newStatus === "draft") {
+      if (oldStatus !== "issued" || Number(invoice.paidAmount) > 0) {
+        throw new Error("Only unpaid issued invoices can be reopened as drafts.");
+      }
+
+      const activeAllocations = await db.receiptAllocation.count({
+        where: { invoiceId, isVoided: false },
+      });
+      if (activeAllocations > 0) {
+        throw new Error("Invoices with receipt allocations cannot be reopened as drafts.");
+      }
+    }
+
     // Transition Validation for manual user actions (systemOverride=true for receipt recalculations)
     const allowedTransitions: Record<InvoiceStatus, InvoiceStatus[]> = {
       draft: ["issued", "cancelled"],
-      issued: ["cancelled"],
+      issued: ["draft", "cancelled"],
       partially_paid: ["cancelled"],
       paid: [],
       cancelled: [],
@@ -173,35 +186,17 @@ export class StatusService {
     // Cancellation handling: release certificates and recycle sequence number
     let updatedInvoiceNumber = invoice.invoiceNumber;
     if (newStatus === "cancelled") {
-      // 1. Release linked training records
-      const lineItems = await db.invoiceLineItem.findMany({
-        where: { invoiceId },
-        select: {
-          trainingId: true,
-          certificate: { select: { trainingId: true } },
-        },
-      });
-      const trainingIds = lineItems
-        .map((li: any) => li.trainingId || li.certificate?.trainingId)
-        .filter(Boolean);
-      if (trainingIds.length > 0) {
-        await db.training.updateMany({
-          where: { id: { in: trainingIds } },
-          data: { certificateIssued: false },
-        });
-      }
-
-      // 2. Delete line items to release linked certificates
+      // Delete line items to release linked certificates
       await db.invoiceLineItem.deleteMany({
         where: { invoiceId },
       });
 
-      // 2. Free up invoiceNumber by adding -CANCELLED suffix
+      // Free up invoiceNumber by adding -CANCELLED suffix
       if (!invoice.invoiceNumber.includes("-CANCELLED")) {
         updatedInvoiceNumber = `${invoice.invoiceNumber}-CANCELLED-${Date.now()}`;
       }
 
-      // 3. Recycle sequence if this was the latest invoice number
+      // Recycle sequence if this was the latest invoice number
       const match = invoice.invoiceNumber.match(/^INV-(\d+)$/);
       if (match) {
         const cancelledNum = parseInt(match[1], 10);
@@ -331,6 +326,7 @@ export class StatusService {
     reason: string | null,
     extraData?: {
       approvalNote?: string | null;
+      scheduledPaymentDate?: Date | null;
       cancellationReason?: string | null;
       paymentDate?: Date | null;
     },
@@ -370,6 +366,9 @@ export class StatusService {
       updateData.approvedAt = new Date();
       if (extraData?.approvalNote !== undefined) {
         updateData.approvalNote = extraData.approvalNote;
+      }
+      if (extraData?.scheduledPaymentDate !== undefined) {
+        updateData.scheduledPaymentDate = extraData.scheduledPaymentDate;
       }
     } else if (newStatus === "paid") {
       updateData.paidById = changedBy;

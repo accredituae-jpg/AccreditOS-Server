@@ -90,6 +90,11 @@ function mapSalaryProfile(profile: any) {
 }
 
 function mapPayrollRecord(record: any) {
+  const toPayrollDate = (date: Date | null | undefined) =>
+    date
+      ? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`
+      : null;
+
   return {
     id: record.id,
     userId: record.userId,
@@ -121,10 +126,11 @@ function mapPayrollRecord(record: any) {
     totalDeduction: Number(record.totalDeduction),
     netSalary: Number(record.netSalary),
     status: record.status,
-    periodStart: record.periodStart ? record.periodStart.toISOString().split("T")[0] : null,
-    periodEnd: record.periodEnd ? record.periodEnd.toISOString().split("T")[0] : null,
+    periodStart: toPayrollDate(record.periodStart),
+    periodEnd: toPayrollDate(record.periodEnd),
+    scheduledPaymentDate: toPayrollDate(record.scheduledPaymentDate),
     paymentReference: record.paymentReference || null,
-    paymentDate: record.paymentDate ? record.paymentDate.toISOString().split("T")[0] : null,
+    paymentDate: toPayrollDate(record.paymentDate),
     notes: record.notes || null,
     approvalNote: record.approvalNote || null,
     cancellationReason: record.cancellationReason || null,
@@ -134,6 +140,8 @@ function mapPayrollRecord(record: any) {
     approvedAt: record.approvedAt || null,
     paidById: record.paidById || null,
     paidAt: record.paidAt || null,
+    createdAt: record.createdAt || null,
+    updatedAt: record.updatedAt || null,
   };
 }
 
@@ -659,6 +667,10 @@ router.get("/records", authenticateJWT, requirePermission("view_payroll"), async
 router.post("/records/generate", authenticateJWT, requirePermission("manage_payroll"), authorizeRoles(["super_admin", "admin"]), async (req: AuthenticatedRequest, res): Promise<void> => {
   const month = normalizeMonth(req.body?.month);
   const year = normalizeYear(req.body?.year);
+  const userId = typeof req.body?.userId === "string" && req.body.userId.trim()
+    ? req.body.userId.trim()
+    : undefined;
+  const notes = typeof req.body?.notes === "string" ? req.body.notes.trim() || null : null;
 
   if (!month || !year) {
     errorResponse(res, "Valid month and year are required.", 400);
@@ -673,6 +685,7 @@ router.post("/records/generate", authenticateJWT, requirePermission("manage_payr
       const profiles = await tx.salaryProfile.findMany({
         where: {
           isActive: true,
+          ...(userId ? { userId } : {}),
           user: {
             isDeleted: false,
             isActive: true,
@@ -684,7 +697,11 @@ router.post("/records/generate", authenticateJWT, requirePermission("manage_payr
       });
 
       if (profiles.length === 0) {
-        throw new Error("No active salary profiles are configured for active employees.");
+        throw new Error(
+          userId
+            ? "No active salary profile is configured for the selected employee."
+            : "No active salary profiles are configured for active employees."
+        );
       }
 
       let seq = await tx.sequence.findUnique({ where: { name: "payroll" } });
@@ -759,6 +776,7 @@ router.post("/records/generate", authenticateJWT, requirePermission("manage_payr
             status: "draft",
             periodStart,
             periodEnd,
+            notes,
             generatedById: req.user?.id,
             generatedAt: new Date(),
           },
@@ -781,10 +799,16 @@ router.post("/records/generate", authenticateJWT, requirePermission("manage_payr
       }
 
       return generatedRecords;
-    });
+    }, { maxWait: 60000, timeout: 60000 });
 
     if (result.length === 0) {
-      errorResponse(res, "Payroll records already exist for all active employees for this period.", 400);
+      errorResponse(
+        res,
+        userId
+          ? "A payroll record already exists for the selected employee for this period."
+          : "Payroll records already exist for all active employees for this period.",
+        400
+      );
       return;
     }
 
@@ -794,7 +818,7 @@ router.post("/records/generate", authenticateJWT, requirePermission("manage_payr
       performedById: req.user?.id,
       performedByName: req.user?.name,
       details: `Generated payroll for ${MONTH_NAMES[month - 1]} ${year}`,
-      data: { month, year, count: result.length },
+      data: { month, year, userId: userId || null, count: result.length },
     }).catch((auditErr) => logger.error({ err: auditErr }, "Payroll generation audit failed"));
 
     successResponse(res, "Payroll generated successfully", result.map(mapPayrollRecord));
@@ -808,6 +832,17 @@ router.post("/records/generate", authenticateJWT, requirePermission("manage_payr
 router.post("/records/:id/approve", authenticateJWT, requirePermission("manage_payroll"), authorizeRoles(["super_admin", "admin"]), async (req: AuthenticatedRequest, res): Promise<void> => {
   const id = req.params.id as string;
   const approvalNote = typeof req.body?.approvalNote === "string" ? req.body.approvalNote : null;
+  const scheduledPaymentDate = req.body?.scheduledPaymentDate
+    ? new Date(req.body.scheduledPaymentDate)
+    : null;
+
+  if (
+    req.body?.scheduledPaymentDate &&
+    (!scheduledPaymentDate || Number.isNaN(scheduledPaymentDate.getTime()))
+  ) {
+    errorResponse(res, "A valid scheduled payment date is required.", 400);
+    return;
+  }
 
   try {
     const updatedRecord = await StatusService.changePayrollStatus(
@@ -815,7 +850,7 @@ router.post("/records/:id/approve", authenticateJWT, requirePermission("manage_p
       "approved",
       req.user?.id || null,
       "Payroll approved by admin",
-      { approvalNote }
+      { approvalNote, scheduledPaymentDate }
     );
 
     await recordAudit({
@@ -825,7 +860,7 @@ router.post("/records/:id/approve", authenticateJWT, requirePermission("manage_p
       performedById: req.user?.id,
       performedByName: req.user?.name,
       details: `Approved payroll for ${updatedRecord.userName} (${MONTH_NAMES[updatedRecord.month - 1]} ${updatedRecord.year})`,
-      data: { payrollId: updatedRecord.id, approvalNote },
+      data: { payrollId: updatedRecord.id, approvalNote, scheduledPaymentDate },
     }).catch((auditErr) => logger.error({ err: auditErr }, "Payroll approval audit failed"));
 
     const fullRecord = await prisma.payrollRecord.findUnique({
@@ -996,7 +1031,14 @@ router.put("/records/:id", authenticateJWT, requirePermission("manage_payroll"),
 router.post("/records/:id/pay", authenticateJWT, requirePermission("manage_payroll"), authorizeRoles(["super_admin", "admin"]), async (req: AuthenticatedRequest, res): Promise<void> => {
   const id = req.params.id as string;
   const paymentDate = req.body?.paymentDate ? new Date(req.body.paymentDate) : new Date();
-  const paymentReference = typeof req.body?.paymentReference === "string" ? req.body.paymentReference : null;
+  if (Number.isNaN(paymentDate.getTime())) {
+    errorResponse(res, "A valid payment date is required.", 400);
+    return;
+  }
+  const paymentReference = typeof req.body?.paymentReference === "string"
+    ? req.body.paymentReference.trim() || null
+    : null;
+  const notes = typeof req.body?.notes === "string" ? req.body.notes.trim() || null : undefined;
 
   try {
     const [expense, updatedRecord] = await prisma.$transaction(async (tx) => {
@@ -1068,12 +1110,13 @@ router.post("/records/:id/pay", authenticateJWT, requirePermission("manage_payro
         data: {
           payslipNumber,
           paymentReference,
+          notes,
         },
         include: payrollRecordInclude,
       });
 
       return [newExpense, finalRecord];
-    });
+    }, { maxWait: 60000, timeout: 60000 });
 
     await recordAudit({
       entity: "PayrollRecord",

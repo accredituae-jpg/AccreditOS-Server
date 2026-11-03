@@ -353,6 +353,7 @@ model PayrollRecord {
   status             PayrollStatus   @default(draft)
   periodStart        DateTime?
   periodEnd          DateTime?
+  scheduledPaymentDate DateTime?
   paymentReference   String?
   paymentDate        DateTime?
   notes              String?
@@ -743,4 +744,3 @@ model PasswordResetToken {
   @@index([email])
   @@index([otp])
 }
-

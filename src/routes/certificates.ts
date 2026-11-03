@@ -348,7 +348,7 @@ router.post("/bulk", authenticateJWT, requirePermission("issue_certificate"), au
         res.status(400).json({ error: `Training for '${training.participantName}' is cancelled. Certificates cannot be issued for cancelled trainings.` });
         return;
       }
-      if (training.certificate || training.certificateIssued) {
+      if (training.certificate) {
         res.status(400).json({ error: `A certificate has already been issued for '${training.participantName}'.` });
         return;
       }

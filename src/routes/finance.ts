@@ -768,7 +768,7 @@ router.get(
         where: {
           serviceType: "inspection",
           status: "completed",
-          certificateIssued: false,
+          certificate: { is: null },
           invoiceLineItems: {
             none: {
               invoice: {
@@ -1340,18 +1340,6 @@ router.post(
             },
           });
 
-          // Batch update external training records to mark them as processed
-          const allTrainingIds = new Set<string>();
-          for (const li of finalLineItems) {
-            if (li.trainingId) allTrainingIds.add(li.trainingId);
-          }
-          if (allTrainingIds.size > 0) {
-            await tx.training.updateMany({
-              where: { id: { in: Array.from(allTrainingIds) } },
-              data: { certificateIssued: true },
-            });
-          }
-
           return createdInvoice;
         },
         { maxWait: 60000, timeout: 60000 },
@@ -1432,13 +1420,20 @@ router.put(
         return;
       }
 
-      // Lock edit checks
-      if (existingInvoice.status !== "draft" && (lineItems || discountAmount)) {
+      const reopeningIssuedInvoice =
+        status === "draft" && existingInvoice.status === "issued";
+
+      // Only unpaid issued invoices may be reopened before editing.
+      if (
+        existingInvoice.status !== "draft" &&
+        (lineItems || discountAmount) &&
+        !reopeningIssuedInvoice
+      ) {
         res
           .status(400)
           .json({
             error:
-              "Only draft invoices are editable. Non-draft invoices require status reversion.",
+              "Only draft invoices are editable. Reopen an unpaid issued invoice first.",
           });
         return;
       }
@@ -1452,11 +1447,17 @@ router.put(
         return;
       }
 
-      // Disallow reverting issued/paid invoices to draft
-      if (status === "draft" && existingInvoice.status !== "draft") {
+      // Reopening is restricted to unpaid issued invoices with no active allocations.
+      if (
+        status === "draft" &&
+        existingInvoice.status !== "draft" &&
+        (!reopeningIssuedInvoice ||
+          Number(existingInvoice.paidAmount) > 0 ||
+          existingInvoice.allocations.length > 0)
+      ) {
         res.status(400).json({
           error:
-            "Issued invoices cannot be reverted to draft. If correction is needed, please cancel this invoice.",
+            "Only issued invoices with no payments or active receipt allocations can be reopened as drafts.",
         });
         return;
       }
@@ -1541,29 +1542,6 @@ router.put(
               }
             }
 
-            // Revert certificateIssued for trainings removed from this invoice
-            const existingLineItems = await tx.invoiceLineItem.findMany({
-              where: { invoiceId: id },
-              select: { trainingId: true },
-            });
-            const oldTrainingIds = existingLineItems
-              .map((li) => li.trainingId)
-              .filter(Boolean) as string[];
-            const newTrainingIds = new Set(
-              calculatedLineItems
-                .map((li) => li.trainingId)
-                .filter(Boolean) as string[],
-            );
-            const removedTrainingIds = oldTrainingIds.filter(
-              (tid) => !newTrainingIds.has(tid),
-            );
-            if (removedTrainingIds.length > 0) {
-              await tx.training.updateMany({
-                where: { id: { in: removedTrainingIds } },
-                data: { certificateIssued: false },
-              });
-            }
-
             // Delete old items
             await tx.invoiceLineItem.deleteMany({ where: { invoiceId: id } });
 
@@ -1604,17 +1582,6 @@ router.put(
               data: calculatedLineItems,
             });
 
-            // Update external training records to mark them as processed
-            const allTrainingIds = new Set<string>();
-            for (const li of calculatedLineItems) {
-              if (li.trainingId) allTrainingIds.add(li.trainingId);
-            }
-            if (allTrainingIds.size > 0) {
-              await tx.training.updateMany({
-                where: { id: { in: Array.from(allTrainingIds) } },
-                data: { certificateIssued: true },
-              });
-            }
           }
 
           // Update fields

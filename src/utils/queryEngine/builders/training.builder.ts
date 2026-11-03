@@ -78,7 +78,9 @@ export function buildTrainingWhere(
   }
 
   if (query.certificateIssued !== undefined) {
-    where.certificateIssued = query.certificateIssued;
+    where.certificate = query.certificateIssued
+      ? { isNot: null }
+      : { is: null };
   }
 
   if (query.serviceType && query.serviceType !== "all") {
