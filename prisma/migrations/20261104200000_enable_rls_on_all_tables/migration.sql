@@ -27,6 +27,7 @@ ALTER TABLE "User" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "VendorBill" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "VendorBillLineItem" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "VendorPayment" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public._prisma_migrations ENABLE ROW LEVEL SECURITY;
 
 -- Revoke direct PostgREST access from Supabase anon and authenticated roles
 REVOKE ALL ON ALL TABLES IN SCHEMA public FROM anon, authenticated;
