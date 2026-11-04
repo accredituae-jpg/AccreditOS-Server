@@ -165,7 +165,7 @@ export async function healOrphanedVendorBillCertificates(client: DbClient) {
   for (const cert of unbilled) {
     if (!cert.trainingId) continue;
     const orphan = orphans.find(
-      (o) =>
+      (o: any) =>
         !usedOrphanIds.has(o.id) &&
         o.trainingId === cert.trainingId &&
         o.vendorBill.awardingBodyId === cert.awardingBodyId
@@ -175,18 +175,18 @@ export async function healOrphanedVendorBillCertificates(client: DbClient) {
     }
   }
 
-  const leftoverOrphans = orphans.filter((o) => !usedOrphanIds.has(o.id));
-  const leftoverCerts = unbilled.filter((c) => !usedCertIds.has(c.id));
+  const leftoverOrphans = orphans.filter((o: any) => !usedOrphanIds.has(o.id));
+  const leftoverCerts = unbilled.filter((c: any) => !usedCertIds.has(c.id));
   const vendorIds = new Set(
     [
-      ...leftoverOrphans.map((o) => o.vendorBill.awardingBodyId),
-      ...leftoverCerts.map((c) => c.awardingBodyId).filter(Boolean),
+      ...leftoverOrphans.map((o: any) => o.vendorBill.awardingBodyId),
+      ...leftoverCerts.map((c: any) => c.awardingBodyId).filter(Boolean),
     ] as string[]
   );
 
   for (const vendorId of vendorIds) {
-    const vendorOrphans = leftoverOrphans.filter((o) => o.vendorBill.awardingBodyId === vendorId);
-    const vendorCerts = leftoverCerts.filter((c) => c.awardingBodyId === vendorId);
+    const vendorOrphans = leftoverOrphans.filter((o: any) => o.vendorBill.awardingBodyId === vendorId);
+    const vendorCerts = leftoverCerts.filter((c: any) => c.awardingBodyId === vendorId);
     if (vendorOrphans.length !== 1 || vendorCerts.length !== 1) continue;
 
     const orphan = vendorOrphans[0];
