@@ -477,8 +477,8 @@ router.get("/company-documents", authenticateJWT, requirePermission(["settings",
         };
       });
 
-      // Sales and Trainer roles can ONLY view training materials
-      if ((req as any).user?.role === "sales" || (req as any).user?.role === "trainer") {
+      // Sales role can ONLY view training materials
+      if ((req as any).user?.role === "sales") {
         sanitized = sanitized.filter((d: any) => d.type === "training_material");
       }
 
@@ -500,12 +500,8 @@ router.post("/company-documents", authenticateJWT, requirePermission(["settings"
     return;
   }
 
-  const userRole = (req as any).user?.role;
-
   const sanitizedInput = documents.map((d: any) => {
-    const type = userRole === "trainer"
-      ? "training_material"
-      : (d.type === "company_document" ? "company_document" : "training_material");
+    const type = d.type === "company_document" ? "company_document" : "training_material";
     const item: any = {
       id: d.id || `cdoc-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       name: d.name,
@@ -520,29 +516,12 @@ router.post("/company-documents", authenticateJWT, requirePermission(["settings"
   });
 
   try {
-    let finalDocumentsToSave = sanitizedInput;
-
-    // If the updater is a trainer, preserve all existing company documents and only update training materials
-    if (userRole === "trainer") {
-      const existingSetting = await (prisma as any).systemSetting?.findUnique({
-        where: { key: "company_documents" },
-      });
-      const existingList = Array.isArray(existingSetting?.valueJson) ? existingSetting.valueJson : [];
-      const existingCompanyDocs = existingList.filter((d: any) => d.type === "company_document");
-      finalDocumentsToSave = [...existingCompanyDocs, ...sanitizedInput];
-    }
-
     const setting = await (prisma as any).systemSetting.upsert({
       where: { key: "company_documents" },
-      update: { valueJson: finalDocumentsToSave },
-      create: { key: "company_documents", valueJson: finalDocumentsToSave }
+      update: { valueJson: sanitizedInput },
+      create: { key: "company_documents", valueJson: sanitizedInput }
     });
     logger.info("Company documents updated successfully");
-
-    if (userRole === "trainer") {
-      res.json(sanitizedInput);
-      return;
-    }
 
     res.json(setting.valueJson);
   } catch (err: any) {
