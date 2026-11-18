@@ -317,6 +317,22 @@ export class FinancialCalculationService {
       // Set receipt status to voided
       await StatusService.changeReceiptStatus(receiptId, "voided", voidedBy, voidReason, db);
 
+      // Void linked Payment records so payment ledger stays in sync
+      const affectedInvoiceIds = receipt.allocations.map((a) => a.invoiceId);
+      if (affectedInvoiceIds.length > 0) {
+        await db.payment.updateMany({
+          where: {
+            invoiceId: { in: affectedInvoiceIds },
+            notes: { contains: `#${receipt.receiptNumber}` },
+            status: "ACTIVE",
+          },
+          data: {
+            status: "VOIDED",
+            notes: `Voided with Receipt Voucher #${receipt.receiptNumber}. ${voidReason || ""}`.trim(),
+          },
+        });
+      }
+
       // Recalculate all affected invoices
       for (const alloc of receipt.allocations) {
         await this.recalculateInvoice(alloc.invoiceId, voidedBy, `Receipt ${receipt.receiptNumber} voided`, db);
