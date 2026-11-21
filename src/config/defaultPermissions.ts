@@ -48,7 +48,7 @@ export const DEFAULT_PERMISSIONS: Record<ConfigurableRole, PermissionMap> = {
     reports: true,
     finance: true,
     payroll: true,
-    users: false,
+    users: true,
     settings: true,
     create_client: true,
     edit_client: true,
