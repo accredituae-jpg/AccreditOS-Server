@@ -12,7 +12,7 @@ if (connectionString && !connectionString.includes("[YOUR_PROJECT_ID]")) {
     connectionString,
     max: 30,
     idleTimeoutMillis: 60000,
-    connectionTimeoutMillis: 5000,
+    connectionTimeoutMillis: 20000,
   });
   const adapter = new PrismaPg(pool);
   prisma = new PrismaClient({ adapter });

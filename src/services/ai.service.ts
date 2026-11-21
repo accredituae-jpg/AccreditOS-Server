@@ -305,7 +305,7 @@ async function executeTool(name: string, args: Record<string, any>) {
           }),
           prisma.pettyCashTopUp.findMany({
             where: { isDeleted: false },
-            select: { amount: true },
+            select: { amount: true, source: true },
           }),
         ]);
 
@@ -322,11 +322,16 @@ async function executeTool(name: string, args: Record<string, any>) {
         const totalExpenses = expenses.reduce((sum, e) => sum + Number(e.amount || 0), 0);
 
         // Petty Cash calculation
-        const totalTopUps = pettyCashTopUps.reduce((sum, t) => sum + Number(t.amount || 0), 0);
+        const totalTopUps = pettyCashTopUps
+          .filter((t) => t.source !== "petty_to_bank" && t.source !== "cash_to_bank")
+          .reduce((sum, t) => sum + Number(t.amount || 0), 0);
+        const totalDeposits = pettyCashTopUps
+          .filter((t) => t.source === "petty_to_bank")
+          .reduce((sum, t) => sum + Number(t.amount || 0), 0);
         const pettyCashExpenses = expenses
           .filter((e) => e.paymentMethod === "petty_cash")
           .reduce((sum, e) => sum + Number(e.amount || 0), 0);
-        const pettyCashBalance = totalTopUps - pettyCashExpenses;
+        const pettyCashBalance = totalTopUps - pettyCashExpenses - totalDeposits;
 
         return {
           totalInvoicedAED: totalInvoiced,

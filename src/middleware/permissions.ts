@@ -22,7 +22,7 @@ export function invalidatePermissionCache(): void {
   permissionCache.clear();
 }
 
-async function loadRolePermissions(role: ConfigurableRole): Promise<PermissionMap> {
+export async function loadRolePermissions(role: ConfigurableRole): Promise<PermissionMap> {
   const cached = permissionCache.get(role);
   if (cached && cached.expiresAt > Date.now()) {
     return cached.permissions;
@@ -40,6 +40,22 @@ async function loadRolePermissions(role: ConfigurableRole): Promise<PermissionMa
   });
 
   return permissions;
+}
+
+export async function checkUserPermission(
+  user: { role?: string; id?: string } | undefined | null,
+  permissionKey: string
+): Promise<boolean> {
+  if (!user || !user.role) return false;
+  if (user.role === "super_admin") return true;
+  const role = user.role as ConfigurableRole;
+  if (!DEFAULT_PERMISSIONS[role]) return false;
+  try {
+    const permissions = await loadRolePermissions(role);
+    return permissions[permissionKey] === true;
+  } catch {
+    return false;
+  }
 }
 
 function hasPermission(

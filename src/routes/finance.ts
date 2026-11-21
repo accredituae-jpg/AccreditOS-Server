@@ -399,10 +399,10 @@ router.get(
           _sum: { amount: true, allocatedAmount: true },
           _count: { id: true },
         }),
-        // 5. Petty Cash Top-Ups
-        (prisma as any).pettyCashTopUp.aggregate({
+        // 5. Petty Cash Top-Ups & Deposits
+        (prisma as any).pettyCashTopUp.findMany({
           where: { isDeleted: false },
-          _sum: { amount: true },
+          select: { amount: true, source: true },
         }),
         // 6. Petty Cash Expenses
         (prisma.expense as any).aggregate({
@@ -452,14 +452,23 @@ router.get(
       const thisMonthExpenses = Number(thisMonthExpenseAgg._sum.amount || 0);
       const totalExpenseCount = expenseAgg._count.id;
 
-      const totalPettyTopUps = Number(
-        (pettyTopUpsAgg as any)?._sum?.amount || 0,
-      );
+      let totalPettyTopUps = 0;
+      let totalPettyDeposits = 0;
+      for (const t of (pettyTopUpsAgg as any[]) || []) {
+        const amt = Number(t.amount || 0);
+        if (t.source === "petty_to_bank") {
+          totalPettyDeposits += amt;
+        } else if (t.source === "cash" || t.source === "account" || !t.source) {
+          totalPettyTopUps += amt;
+        }
+      }
       const totalPettyExpenses = Number(
         (pettyExpensesAgg as any)?._sum?.amount || 0,
       );
       const pettyCashBalance =
-        Math.round((totalPettyTopUps - totalPettyExpenses) * 100) / 100;
+        Math.round(
+          (totalPettyTopUps - totalPettyExpenses - totalPettyDeposits) * 100,
+        ) / 100;
 
       const totalReceipts = Number(receiptAgg._sum.amount || 0);
       const allocatedReceipts = Number(receiptAgg._sum.allocatedAmount || 0);
@@ -2216,26 +2225,42 @@ router.get(
         0,
       );
 
-      const totalTopUps = (topUps as any[]).reduce(
-        (acc, t) => acc + Number(t.amount),
-        0,
-      );
+      let totalTopUps = 0;
+      let totalPettyDepositsToBank = 0;
+      let topUpsFromCash = 0;
+      let cashDepositsToBank = 0;
+
+      for (const t of (topUps as any[])) {
+        const amt = Number(t.amount);
+        if (t.source === "petty_to_bank") {
+          totalPettyDepositsToBank += amt;
+        } else if (t.source === "cash_to_bank") {
+          cashDepositsToBank += amt;
+        } else if (t.source === "cash") {
+          totalTopUps += amt;
+          topUpsFromCash += amt;
+        } else {
+          totalTopUps += amt;
+        }
+      }
+
       const pettyCashBalance =
-        Math.round((totalTopUps - totalPettySpent) * 100) / 100;
+        Math.round(
+          (totalTopUps - totalPettySpent - totalPettyDepositsToBank) * 100,
+        ) / 100;
 
       const totalCashReceipts = cashReceipts.reduce(
         (acc, r) => acc + Number(r.amount),
         0,
       );
-      const topUpsFromCash = (topUps as any[])
-        .filter((t) => t.source === "cash")
-        .reduce((acc, t) => acc + Number(t.amount), 0);
+
       const cashInHandBalance =
         Math.round(
           (totalCashReceipts -
             totalCashExpenses -
             totalCashVendorPayments -
-            topUpsFromCash) *
+            topUpsFromCash -
+            cashDepositsToBank) *
             100,
         ) / 100;
 
@@ -2245,10 +2270,13 @@ router.get(
           pettyCashBalance,
           totalTopUps: Math.round(totalTopUps * 100) / 100,
           totalPettySpent: Math.round(totalPettySpent * 100) / 100,
+          totalPettyDepositsToBank:
+            Math.round(totalPettyDepositsToBank * 100) / 100,
           cashInHandBalance,
           totalCashReceipts: Math.round(totalCashReceipts * 100) / 100,
           totalCashExpenses: Math.round(totalCashExpenses * 100) / 100,
           topUpsFromCash: Math.round(topUpsFromCash * 100) / 100,
+          cashDepositsToBank: Math.round(cashDepositsToBank * 100) / 100,
           recentTopUps: (topUps as any[]).slice(0, 10).map((t: any) => ({
             id: t.id,
             amount: Number(t.amount),
@@ -2268,7 +2296,7 @@ router.get(
   },
 );
 
-// POST /api/finance/petty-cash/top-ups - Add float/deposit into Petty Cash
+// POST /api/finance/petty-cash/top-ups - Add float/deposit into Petty Cash OR Deposit to Bank
 router.post(
   "/petty-cash/top-ups",
   authenticateJWT,
@@ -2277,16 +2305,26 @@ router.post(
   async (req, res): Promise<void> => {
     try {
       const user = (req as any).user;
-      const { amount, date, source, notes } = req.body;
+      const { amount, date, source, notes, type } = req.body;
 
       if (!amount || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0) {
         res
           .status(400)
-          .json({ error: "A valid positive top-up amount is required." });
+          .json({ error: "A valid positive amount is required." });
         return;
       }
 
-      const resolvedSource = source === "account" ? "account" : "cash";
+      let resolvedSource = "cash";
+      if (
+        type === "deposit" ||
+        source === "petty_to_bank" ||
+        source === "cash_to_bank"
+      ) {
+        resolvedSource =
+          source === "cash_to_bank" ? "cash_to_bank" : "petty_to_bank";
+      } else {
+        resolvedSource = source === "account" ? "account" : "cash";
+      }
 
       const topUp = await (prisma as any).pettyCashTopUp.create({
         data: {
@@ -2299,13 +2337,18 @@ router.post(
         },
       });
 
+      const isDeposit =
+        resolvedSource === "petty_to_bank" ||
+        resolvedSource === "cash_to_bank";
       logger.info(
         { id: topUp.id, amount: topUp.amount, source: resolvedSource },
-        "Petty cash top-up logged",
+        isDeposit ? "Cash deposit to bank logged" : "Petty cash top-up logged",
       );
       res.status(201).json({
         success: true,
-        message: "Petty cash top-up recorded successfully.",
+        message: isDeposit
+          ? "Cash deposit to bank recorded successfully."
+          : "Petty cash top-up recorded successfully.",
         data: {
           id: topUp.id,
           amount: Number(topUp.amount),
@@ -2508,40 +2551,111 @@ router.get(
       }
 
       for (const t of (pettyCashTopUps as any[]) || []) {
-        const sourceMethod = t.source === "cash" ? "Cash" : "Account";
+        const amt = Number(t.amount);
         const dateStr = (
           t.date instanceof Date ? t.date : new Date(t.date)
         ).toISOString();
 
-        // 1. Inflow into Petty Cash Drawer
-        items.push({
-          id: `pct-in-${t.id}`,
-          date: dateStr,
-          flow: "in",
-          type: "petty_cash_topup",
-          category: "Petty Cash Top-Up",
-          refNo: `TOPUP-${t.id.slice(0, 6).toUpperCase()}`,
-          partyName: "Petty Cash Drawer",
-          paymentMethod: "Petty Cash",
-          amount: Number(t.amount),
-          description:
-            t.notes ||
-            `Top-up into Petty Cash (from ${sourceMethod === "Cash" ? "Cash in Hand" : "Bank Account"})`,
-        });
+        if (t.source === "petty_to_bank") {
+          // Deposit from Petty Cash Drawer into Company Bank Account
+          // 1. Inflow into Bank Account
+          items.push({
+            id: `pct-dep-in-${t.id}`,
+            date: dateStr,
+            flow: "in",
+            type: "bank_deposit",
+            category: "Bank Deposit",
+            refNo: `DEP-${t.id.slice(0, 6).toUpperCase()}`,
+            partyName: "Company Bank Account",
+            paymentMethod: "Account",
+            amount: amt,
+            description: t.notes
+              ? `Bank Deposit: ${t.notes} (from Petty Cash)`
+              : "Bank Deposit from Petty Cash Float",
+          });
 
-        // 2. Outflow from Source (Cash in Hand or Bank Account)
-        items.push({
-          id: `pct-out-${t.id}`,
-          date: dateStr,
-          flow: "out",
-          type: "petty_cash_transfer",
-          category: "Petty Cash Transfer",
-          refNo: `TRF-${t.id.slice(0, 6).toUpperCase()}`,
-          partyName: "Petty Cash Drawer",
-          paymentMethod: sourceMethod,
-          amount: Number(t.amount),
-          description: `Transferred to Petty Cash Float (${t.notes || "Top-up"})`,
-        });
+          // 2. Outflow from Petty Cash Drawer
+          items.push({
+            id: `pct-dep-out-${t.id}`,
+            date: dateStr,
+            flow: "out",
+            type: "petty_cash_deposit",
+            category: "Petty Cash Transfer",
+            refNo: `TRF-${t.id.slice(0, 6).toUpperCase()}`,
+            partyName: "Petty Cash Drawer",
+            paymentMethod: "Petty Cash",
+            amount: amt,
+            description: t.notes
+              ? `Deposited to Bank: ${t.notes}`
+              : "Deposited into Company Bank Account",
+          });
+        } else if (t.source === "cash_to_bank") {
+          // Deposit from Cash in Hand into Company Bank Account
+          // 1. Inflow into Bank Account
+          items.push({
+            id: `pct-dep-in-${t.id}`,
+            date: dateStr,
+            flow: "in",
+            type: "bank_deposit",
+            category: "Bank Deposit",
+            refNo: `DEP-${t.id.slice(0, 6).toUpperCase()}`,
+            partyName: "Company Bank Account",
+            paymentMethod: "Account",
+            amount: amt,
+            description: t.notes
+              ? `Bank Deposit: ${t.notes} (from Cash in Hand)`
+              : "Bank Deposit from Cash in Hand",
+          });
+
+          // 2. Outflow from Cash in Hand
+          items.push({
+            id: `pct-dep-out-${t.id}`,
+            date: dateStr,
+            flow: "out",
+            type: "cash_deposit",
+            category: "Cash in Hand Transfer",
+            refNo: `TRF-${t.id.slice(0, 6).toUpperCase()}`,
+            partyName: "Cash in Hand",
+            paymentMethod: "Cash",
+            amount: amt,
+            description: t.notes
+              ? `Deposited to Bank: ${t.notes}`
+              : "Deposited into Company Bank Account",
+          });
+        } else {
+          // Normal Top-up into Petty Cash
+          const sourceMethod = t.source === "cash" ? "Cash" : "Account";
+
+          // 1. Inflow into Petty Cash Drawer
+          items.push({
+            id: `pct-in-${t.id}`,
+            date: dateStr,
+            flow: "in",
+            type: "petty_cash_topup",
+            category: "Petty Cash Top-Up",
+            refNo: `TOPUP-${t.id.slice(0, 6).toUpperCase()}`,
+            partyName: "Petty Cash Drawer",
+            paymentMethod: "Petty Cash",
+            amount: amt,
+            description:
+              t.notes ||
+              `Top-up into Petty Cash (from ${sourceMethod === "Cash" ? "Cash in Hand" : "Bank Account"})`,
+          });
+
+          // 2. Outflow from Source (Cash in Hand or Bank Account)
+          items.push({
+            id: `pct-out-${t.id}`,
+            date: dateStr,
+            flow: "out",
+            type: "petty_cash_transfer",
+            category: "Petty Cash Transfer",
+            refNo: `TRF-${t.id.slice(0, 6).toUpperCase()}`,
+            partyName: "Petty Cash Drawer",
+            paymentMethod: sourceMethod,
+            amount: amt,
+            description: `Transferred to Petty Cash Float (${t.notes || "Top-up"})`,
+          });
+        }
       }
 
       // Compute opening balance before fromDate
@@ -2697,19 +2811,42 @@ router.get(
       let allTopUpsToPetty = 0;
       let topUpsFromCash = 0;
       let topUpsFromBank = 0;
+      let depositsFromPettyToBank = 0;
+      let depositsFromCashToBank = 0;
+
       for (const t of allTopUps) {
         const amt = Number(t.amount);
-        allTopUpsToPetty += amt;
-        if (t.source === "cash") topUpsFromCash += amt;
-        else topUpsFromBank += amt;
+        if (t.source === "petty_to_bank") {
+          depositsFromPettyToBank += amt;
+        } else if (t.source === "cash_to_bank") {
+          depositsFromCashToBank += amt;
+        } else if (t.source === "cash") {
+          allTopUpsToPetty += amt;
+          topUpsFromCash += amt;
+        } else {
+          allTopUpsToPetty += amt;
+          topUpsFromBank += amt;
+        }
       }
 
       const realPettyCash =
-        Math.round((allTopUpsToPetty - allPettyOut) * 100) / 100;
+        Math.round(
+          (allTopUpsToPetty - allPettyOut - depositsFromPettyToBank) * 100,
+        ) / 100;
       const realCashInHand =
-        Math.round((allCashIn - allCashOut - topUpsFromCash) * 100) / 100;
+        Math.round(
+          (allCashIn - allCashOut - topUpsFromCash - depositsFromCashToBank) *
+            100,
+        ) / 100;
       const realBank =
-        Math.round((allBankIn - allBankOut - topUpsFromBank) * 100) / 100;
+        Math.round(
+          (allBankIn -
+            allBankOut -
+            topUpsFromBank +
+            depositsFromPettyToBank +
+            depositsFromCashToBank) *
+            100,
+        ) / 100;
       const totalLiquidFunds =
         Math.round((realBank + realCashInHand + realPettyCash) * 100) / 100;
 
