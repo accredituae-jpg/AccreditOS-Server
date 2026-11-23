@@ -466,6 +466,9 @@ export class UnifiedFinancialCalculationService {
                 { training: { status: { not: "cancelled" } } },
               ],
             },
+            {
+              status: { not: "digital" },
+            },
           ],
           ...(hasDateRange ? { issueDate: dateFilter } : {}),
         },
@@ -506,6 +509,9 @@ export class UnifiedFinancialCalculationService {
                     { trainingId: null },
                     { training: { status: { not: "cancelled" } } },
                   ],
+                },
+                {
+                  status: { not: "digital" },
                 },
               ],
               ...(end ? { issueDate: { lte: end } } : {}),

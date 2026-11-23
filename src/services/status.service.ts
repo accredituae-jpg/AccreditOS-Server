@@ -91,12 +91,13 @@ export class StatusService {
       return cert;
     }
 
-    // Transition Validation - allow moving between created and sent
+    // Transition Validation - allow moving between created, sent, and digital
     const allowedTransitions: Record<CertificateStatus, CertificateStatus[]> = {
-      created: ["sent"],
-      sent: ["created"],
-      printed: ["created", "sent"],
-      distributed: ["created", "sent"],
+      created: ["sent", "digital"],
+      sent: ["created", "digital"],
+      digital: ["created", "sent"],
+      printed: ["created", "sent", "digital"],
+      distributed: ["created", "sent", "digital"],
     };
 
     if (!allowedTransitions[oldStatus].includes(newStatus)) {
@@ -107,6 +108,18 @@ export class StatusService {
     if (newStatus === "sent") {
       updateData.distributedDate = new Date();
       updateData.distributedBy = changedBy;
+    }
+    if (newStatus === "digital") {
+      // Digital certificates have no physical print and no awarding body printing fee
+      updateData.awardingBodyFee = 0.0;
+    } else if (oldStatus === "digital" && (newStatus === "created" || newStatus === "sent")) {
+      // If switched back from digital to physical, restore standard fee from awarding body
+      if (cert.awardingBodyId) {
+        const ab = await db.awardingBody.findUnique({ where: { id: cert.awardingBodyId } });
+        if (ab) {
+          updateData.awardingBodyFee = Number(ab.certificateFee || 0);
+        }
+      }
     }
 
     const updated = await db.certificate.update({

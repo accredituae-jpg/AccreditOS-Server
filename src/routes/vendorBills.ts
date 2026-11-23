@@ -145,6 +145,7 @@ router.get("/vendor-bills/candidates", authenticateJWT, requirePermission("finan
     const whereCondition: any = {
       awardingBodyId,
       OR: orConditions,
+      status: { not: "digital" },
     };
 
     if (from || to) {
@@ -236,6 +237,7 @@ router.get("/vendor-bills/vendors-summary", authenticateJWT, requirePermission([
               { vendorBillLineItem: null },
               { vendorBillLineItem: { vendorBill: { status: "CANCELLED" } } },
             ],
+            status: { not: "digital" },
           },
           include: {
             course: true,

@@ -451,8 +451,8 @@ router.post("/bulk", authenticateJWT, requirePermission("issue_certificate"), au
             durationDays: item.durationDays ? parseInt(item.durationDays, 10) : null,
             drivingLicenseNo: item.drivingLicenseNo || training.drivingLicenseNo || null,
             drivingLicenseType: item.drivingLicenseType || training.drivingLicenseType || null,
-            status: "created",
-            awardingBodyFee,
+            status: item.status || "created",
+            awardingBodyFee: item.status === "digital" ? 0.0 : awardingBodyFee,
             awardingBodyId: effectiveAwardingBodyId || null,
             trainingId: training.id
           }
@@ -531,7 +531,7 @@ router.post("/bulk", authenticateJWT, requirePermission("issue_certificate"), au
 
 // POST /api/certificates - Issue Certificate
 router.post("/", authenticateJWT, requirePermission("issue_certificate"), authorizeRoles(["super_admin", "admin", "operation_admin", "trainer"]), async (req: any, res): Promise<void> => {
-  const { trainingId, serviceType, expiryYears, issueDate, certificateType, certificateNumber, awardingBodyId, durationDays, drivingLicenseNo, drivingLicenseType, customCompany } = req.body;
+  const { trainingId, serviceType, expiryYears, issueDate, certificateType, certificateNumber, awardingBodyId, durationDays, drivingLicenseNo, drivingLicenseType, customCompany, status } = req.body;
   const missingFields: string[] = [];
   if (!trainingId) missingFields.push("trainingId");
   if (!expiryYears) missingFields.push("expiryYears");
@@ -626,8 +626,8 @@ router.post("/", authenticateJWT, requirePermission("issue_certificate"), author
           durationDays: durationDays ? parseInt(durationDays, 10) : null,
           drivingLicenseNo: drivingLicenseNo || training.drivingLicenseNo || null,
           drivingLicenseType: drivingLicenseType || training.drivingLicenseType || null,
-          status: "created",
-          awardingBodyFee,
+          status: status || "created",
+          awardingBodyFee: status === "digital" ? 0.0 : awardingBodyFee,
           awardingBodyId: effectiveAwardingBodyId || null,
           trainingId: training.id
         },
@@ -754,7 +754,7 @@ router.put("/:id", authenticateJWT, requirePermission("edit_certificate"), autho
         drivingLicenseNo: drivingLicenseNo !== undefined ? (drivingLicenseNo || null) : undefined,
         drivingLicenseType: drivingLicenseType !== undefined ? (drivingLicenseType || null) : undefined,
         customCompany: customCompany !== undefined ? (customCompany ? customCompany.trim() : null) : undefined,
-        awardingBodyFee: awardingBodyFee !== undefined ? parseFloat(awardingBodyFee) : undefined,
+        awardingBodyFee: status === "digital" ? 0.0 : (awardingBodyFee !== undefined ? parseFloat(awardingBodyFee) : undefined),
         awardingBodyId: awardingBodyId !== undefined ? (awardingBodyId || null) : undefined
       },
       include: {
