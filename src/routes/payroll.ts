@@ -754,6 +754,100 @@ router.post("/records/generate", authenticateJWT, requirePermission("manage_payr
 
         const snapshot = PayrollCalculationService.generatePayrollSnapshot(profile, Number(totalAdvanceDec));
 
+        // Support custom overrides when generating for an individual employee
+        const isSingleUser = Boolean(userId && profile.userId === userId);
+
+        let finalBasicSalary = snapshot.basicSalary;
+        let finalHousing = snapshot.housingAllowance;
+        let finalTransport = snapshot.transportAllowance;
+        let finalFood = snapshot.foodAllowance;
+        let finalOvertime = new Prisma.Decimal(0);
+        let finalBonus = new Prisma.Decimal(0);
+        let finalCommission = new Prisma.Decimal(0);
+        let finalReimbursement = new Prisma.Decimal(0);
+        let finalOtherEarnings = new Prisma.Decimal(0);
+
+        let finalAdvance = totalAdvanceDec;
+        let finalLoan = new Prisma.Decimal(0);
+        let finalLeaveDeduction = new Prisma.Decimal(0);
+        let finalPenalty = new Prisma.Decimal(0);
+        let finalOtherDeductions = new Prisma.Decimal(0);
+        let finalNotes = notes;
+
+        if (isSingleUser) {
+          if (req.body?.basicSalary !== undefined) {
+            finalBasicSalary = new Prisma.Decimal(Number(req.body.basicSalary) || 0);
+          }
+          if (req.body?.housingAllowance !== undefined) {
+            finalHousing = new Prisma.Decimal(Number(req.body.housingAllowance) || 0);
+          }
+          if (req.body?.transportAllowance !== undefined) {
+            finalTransport = new Prisma.Decimal(Number(req.body.transportAllowance) || 0);
+          }
+          if (req.body?.foodAllowance !== undefined) {
+            finalFood = new Prisma.Decimal(Number(req.body.foodAllowance) || 0);
+          }
+          if (req.body?.overtime !== undefined) {
+            finalOvertime = new Prisma.Decimal(Number(req.body.overtime) || 0);
+          }
+          if (req.body?.bonus !== undefined) {
+            finalBonus = new Prisma.Decimal(Number(req.body.bonus) || 0);
+          }
+          if (req.body?.commission !== undefined) {
+            finalCommission = new Prisma.Decimal(Number(req.body.commission) || 0);
+          }
+          if (req.body?.reimbursement !== undefined) {
+            finalReimbursement = new Prisma.Decimal(Number(req.body.reimbursement) || 0);
+          }
+
+          const travelAllowance = Number(req.body?.travelAllowance) || 0;
+          const otherEarningsInput = Number(req.body?.otherEarnings) || 0;
+          finalOtherEarnings = new Prisma.Decimal(otherEarningsInput + travelAllowance);
+
+          if (req.body?.leaveDeduction !== undefined) {
+            finalLeaveDeduction = new Prisma.Decimal(Number(req.body.leaveDeduction) || 0);
+          }
+          if (req.body?.loanInstallment !== undefined) {
+            finalLoan = new Prisma.Decimal(Number(req.body.loanInstallment) || 0);
+          }
+          if (req.body?.penalty !== undefined) {
+            finalPenalty = new Prisma.Decimal(Number(req.body.penalty) || 0);
+          }
+          if (req.body?.otherDeductions !== undefined) {
+            finalOtherDeductions = new Prisma.Decimal(Number(req.body.otherDeductions) || 0);
+          }
+
+          if (travelAllowance > 0) {
+            const ticketNote = `Includes AED ${travelAllowance.toLocaleString()} travel/ticket allowance`;
+            finalNotes = finalNotes ? `${finalNotes} | ${ticketNote}` : ticketNote;
+          }
+        }
+
+        const calculatedGross = PayrollCalculationService.calculateGrossSalary(
+          finalBasicSalary,
+          finalHousing,
+          finalTransport,
+          finalFood,
+          finalOvertime,
+          finalBonus,
+          finalCommission,
+          finalReimbursement,
+          finalOtherEarnings
+        );
+
+        const calculatedDeductions = PayrollCalculationService.calculateTotalDeduction(
+          finalAdvance,
+          finalLoan,
+          finalLeaveDeduction,
+          finalPenalty,
+          finalOtherDeductions
+        );
+
+        const calculatedNet = PayrollCalculationService.calculateNetSalary(
+          calculatedGross,
+          calculatedDeductions
+        );
+
         const newRecord = await tx.payrollRecord.create({
           data: {
             userId: profile.userId,
@@ -762,21 +856,30 @@ router.post("/records/generate", authenticateJWT, requirePermission("manage_payr
             year,
             payrollNumber,
             // Baseline Fixed
-            basicSalary: snapshot.basicSalary,
-            housingAllowance: snapshot.housingAllowance,
-            transportAllowance: snapshot.transportAllowance,
-            foodAllowance: snapshot.foodAllowance,
-            // Variable Earnings (defaults to 0.00)
-            // Variable Deductions (with advance)
-            advance: totalAdvanceDec,
+            basicSalary: finalBasicSalary,
+            housingAllowance: finalHousing,
+            transportAllowance: finalTransport,
+            foodAllowance: finalFood,
+            // Variable Earnings
+            overtime: finalOvertime,
+            bonus: finalBonus,
+            commission: finalCommission,
+            reimbursement: finalReimbursement,
+            otherEarnings: finalOtherEarnings,
+            // Variable Deductions
+            advance: finalAdvance,
+            loanInstallment: finalLoan,
+            leaveDeduction: finalLeaveDeduction,
+            penalty: finalPenalty,
+            otherDeductions: finalOtherDeductions,
             // Summaries
-            grossSalary: snapshot.grossSalary,
-            totalDeduction: snapshot.totalDeduction,
-            netSalary: snapshot.netSalary,
+            grossSalary: calculatedGross,
+            totalDeduction: calculatedDeductions,
+            netSalary: calculatedNet,
             status: "draft",
             periodStart,
             periodEnd,
-            notes,
+            notes: finalNotes,
             generatedById: req.user?.id,
             generatedAt: new Date(),
           },
