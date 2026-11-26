@@ -1432,23 +1432,33 @@ router.put(
       const reopeningIssuedInvoice =
         status === "draft" && existingInvoice.status === "issued";
 
+      const isModifyingDiscount =
+        discountAmount !== undefined &&
+        !new Prisma.Decimal(discountAmount).equals(
+          existingInvoice.discountAmount || new Prisma.Decimal(0)
+        );
+
       // Only unpaid issued invoices may be reopened before editing.
       if (
         existingInvoice.status !== "draft" &&
-        (lineItems || discountAmount) &&
+        (lineItems || isModifyingDiscount) &&
         !reopeningIssuedInvoice
       ) {
         res
           .status(400)
           .json({
             error:
-              "Only draft invoices are editable. Reopen an unpaid issued invoice first.",
+              "Line items and pricing cannot be edited on non-draft invoices. You can still update notes, terms, due dates, and client reference details.",
           });
         return;
       }
 
-      // Disallow manual payment status overrides
-      if (status && (status === "paid" || status === "partially_paid")) {
+      // Disallow manual payment status overrides if changing status
+      if (
+        status &&
+        status !== existingInvoice.status &&
+        (status === "paid" || status === "partially_paid")
+      ) {
         res.status(400).json({
           error:
             "Invoice payment status cannot be updated manually. Please issue a receipt to record payment.",
